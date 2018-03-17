@@ -1,0 +1,5 @@
+#.gitignore
+.idea/
+.vscode/
+*.pyo
+*.pyc

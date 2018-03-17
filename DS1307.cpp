@@ -17,7 +17,7 @@
 #include <Wire.h> // Wire library fuer I2C
 #include "DS1307.h"
 
-//#define DEBUG
+// #define DEBUG
 
 /**
  * Initialisierung mit der Adresse der DS1307

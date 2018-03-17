@@ -1,6 +1,5 @@
 /**
- * Clockthree.pde (.ino)
- * Die "Firmware" der Selbstbau-QLOCKTWO.
+  Spezial Qlock Buebs edition
  *
  * @mc       Arduino/RBBB
  * @autor    Christian Aschoff / caschoff _AT_ mac _DOT_ com
@@ -80,8 +79,8 @@
  * Die Status-LEDs koennen hier durch auskommentieren ausgeschaltet werden.
  * Default: eingeschaltet 
  */
-#define ENABLE_DCF_LED
-#define ENABLE_SQW_LED
+//#define ENABLE_DCF_LED
+//#define ENABLE_SQW_LED
 
 /*
  * Wer einen LDR (an A3) installiert hat, kann diese Zeile auskommentieren und hat dann eine von
@@ -146,7 +145,7 @@ DCF77Helper dcf77Helper;
 /**
  * Der Lautsprecher
  */
-#define SPEAKER  13
+#define SPEAKER  99
 #define SPEAKER_FREQUENCY 200000
 /**
  * Variablen fuer den Alarm.
@@ -221,32 +220,36 @@ Button modeChangeButton(7);
  * Achtung! Wenn sich die Uhr nachmittags abschaltet ist sie in der falschen Tageshaelfte!
  */
 // um 3 Uhr Display abschalten (Minuten, Stunden, -, -, -, -)
-TimeStamp offTime(0, 0, 0, 0, 0, 0);
+TimeStamp offTime(0, 3, 0, 0, 0, 0);
 // um 4:30 Uhr Display wieder anschalten (Minuten, Stunden, -, -, -, -)
-TimeStamp onTime(0, 0, 0, 0, 0, 0);
+TimeStamp onTime(15, 3, 0, 0, 0, 0);
 // Merker fuer den Modus vor der Abschaltung...
 int lastMode = mode;
 
-//Anpassungen RV
+/*
+ * modifications for rovivo library
+ * 1. loveheart
+ * 2. swiss national holyday
+ */
+
 //Hochzeitstag
 byte HTag = 25;
 byte HMonat = 8;
-byte heartnr = 1;
-//LoveHeart
-unsigned long prevmillisH = 0;
-unsigned long intervallH = 15000;
-byte savemode = 0;
+byte heartnr = 1; //LoveHeart
+int intervallH = 2500;
+int zaehlerH = 0;
+bool topH = false;
 
 //Nationalfeiertag
 byte NTag = 1;
-byte NMonat = 8;
-//Schweizerkreuz
-unsigned long prevMillisN = 0;
-unsigned long intervallN = 7500;
+byte NMonat = 8; //Schweizerkreuz
+int intervallN = 2500;
+int zaehlerN = 0;
+bool topN = false;
 byte Nnr = 1;
 
-
-
+//Test Rovivo
+byte testnr = 1;
 
 // Ueber die Wire-Library festgelegt:
 // Arduino analog input 4 = I2C SDA
@@ -254,6 +257,8 @@ byte Nnr = 1;
 
 // Die Matrix, eine Art Bildschirmspeicher
 word matrix[16];
+// load ROVIVO library with modifications
+#include "rovivo.h"
 
 // Hilfsvariable, da I2C und Interrupts nicht zusammenspielen
 volatile boolean needsUpdateFromRtc = true;
@@ -279,7 +284,6 @@ volatile boolean needsUpdateFromRtc = true;
  * einstimmen.
  */
    #include "Woerter_DE.h"
-// #include "Woerter_CH.h"
 
 /**
  * Hier wird die Datei includiert, die die Eck-Leds setzt.
@@ -300,12 +304,6 @@ volatile boolean needsUpdateFromRtc = true;
  */
 // Hochdeutsch:
    #include "SetMinutes_DE_DE.h"
-// Schwaebisch (viertel Drei; dreiviertel Sechs):
-// #include "SetMinutes_DE_SW.h"
-// Bayrisch (viertel vor Drei aber dreiviertel Vier):
-// #include "SetMinutes_DE_BA.h"
-// Schweizerdeutsch (benoetigt angepasste Frontplatte):
-// #include "SetMinutes_CH.h"
 
 /**
  * Hier wird die Datei includiert, die fuer
@@ -313,8 +311,6 @@ volatile boolean needsUpdateFromRtc = true;
  */
 // Deutsch:
    #include "SetHours_DE.h"
-// Schweizerdeutsch:
-// #include "SetHours_CH.h"
 
 /**
  * Initialisierung. setup() wird einmal zu Beginn aufgerufen, wenn der
@@ -323,6 +319,7 @@ volatile boolean needsUpdateFromRtc = true;
 void setup() {
   Serial.begin(SERIAL_SPEED);
   Serial.println("Qlockthree is initialazing...");
+
 #ifdef DEBUG
   Serial.println("... and starting in debug-mode...");
 #endif
@@ -353,7 +350,7 @@ void setup() {
   // DCF77-LED drei Mal als 'Hello' blinken lassen
   for(int i=0; i<3; i++) {
     digitalWrite(dcf77Led, HIGH);
-    tone(SPEAKER, SPEAKER_FREQUENCY); 
+    tone(SPEAKER, SPEAKER_FREQUENCY);
     delay(100);
     digitalWrite(dcf77Led, LOW);
     noTone(SPEAKER);
@@ -399,7 +396,7 @@ void setup() {
   // rtcSQWLed-LED drei Mal als 'Hello' blinken lassen
   for(int i=0; i<3; i++) {
     digitalWrite(rtcSQWLed, HIGH);
-    tone(SPEAKER, SPEAKER_FREQUENCY); 
+    tone(SPEAKER, SPEAKER_FREQUENCY);
     delay(100);    
     digitalWrite(rtcSQWLed, LOW);
     noTone(SPEAKER);
@@ -506,7 +503,7 @@ void loop() {
       case LOVEH:
         setLH();
         break;
-        case NFTM:
+      case NFTM:
         setNFT();
         break;
         
@@ -633,35 +630,40 @@ void loop() {
  
  //Modus auf Herz umschalten wenn das Datum der Hochzeitstag ist
  if (ds1307.getDate() == HTag && ds1307.getMonth() == HMonat){
-   if (mode != LOVEH){
-     savemode = mode;
-     heartnr = 0;
-   }
-   unsigned long aktMillis = millis();
-   if(aktMillis - prevmillisH > intervallH) {
-    prevmillisH = aktMillis;  
-    if (mode == LOVEH)
-      mode = savemode;
-    else
-      mode = LOVEH;
-  }
+   if (zaehlerH > intervallH && topH == LOW)
+    {topH = HIGH;}
+   if (topH == LOW)
+    {zaehlerH++;}
+   if (topH == HIGH && zaehlerH > 0)
+    {zaehlerH--;
+      if (zaehlerH == 0)
+        {topH = LOW;}
+    }
+    if (topH == HIGH) {mode = LOVEH;}
+    if (topH == LOW){mode = NORMAL;}
+ Serial.println(topH);
+ Serial.println(zaehlerH);
+   //if (mode != LOVEH){heartnr = 0;}
  }
-      
+
   //Modus auf Schweizerkreuz umschalten wenn das Datum der 1. August ist
  if (ds1307.getDate() == NTag && ds1307.getMonth() == NMonat){
-   if (mode != NFTM){
-     savemode = mode;
-   }
-   unsigned long aktMillisN = millis();
-   if(aktMillisN - prevMillisN > intervallN) {
-    prevMillisN = aktMillisN;   
-    if (mode == NFTM)
-    mode = savemode;
-    else
-      mode = NFTM;
-  }
+   if (zaehlerN > intervallN && topN == LOW)
+    {topN = HIGH;}
+   if (topN == LOW)
+    {zaehlerN++;}
+   if (topN == HIGH && zaehlerN > 0)
+    {zaehlerN--;
+      if (zaehlerN == 0)
+        {topN = LOW;}
+    }
+    if (topN == HIGH) {mode = NFTM;}
+    if (topN == LOW){mode = NORMAL;}
+ Serial.println(topN);
+ Serial.println(zaehlerN);
  }
-  
+
+ 
   // Display zeitgesteuert abschalten?
   if((offTime.getMinutesOfDay() != 0) && (onTime.getMinutesOfDay() != 0)) {
     if((mode != BLANK) && (offTime.getMinutesOfDay() == ds1307.getMinutesOfDay())) {
@@ -787,191 +789,6 @@ void clearScreenBuffer() {
 void setAllScreenBuffer() {
   for (int i = 0; i < 16; i++) {
     matrix[i] = 65535;
-  }
-}
-
-//LoveHeart ausgeben
-void setLH() {
-   if (heartnr >= 6)
-      heartnr = 1;
-    else
-      heartnr++;
-  switch (heartnr)
-    {
-     case 1:
-     matrix[0]  = 0b0000000000000000;
-     matrix[1]  = 0b0000000000000000;
-     matrix[2]  = 0b0001101100000000;
-     matrix[3]  = 0b0010010010000000;
-     matrix[4]  = 0b0010000010000000;
-     matrix[5]  = 0b0001000100000000;
-     matrix[6]  = 0b0000101000000000;
-     matrix[7]  = 0b0000010000000000;
-     matrix[8]  = 0b0000000000000000;
-     matrix[9]  = 0b0000000000000000;
-     matrix[10] = 0b0000000000000000;
-     matrix[11] = 0b0000000000000000;
-     matrix[12] = 0b0000000000000000;
-     matrix[13] = 0b0000000000000000;
-     matrix[14] = 0b0000000000000000;
-     matrix[15] = 0b0000000000000000;
-     break;
-     case 2:
-     matrix[0]  = 0b0000000000000000;
-     matrix[1]  = 0b0011101110000000;
-     matrix[2]  = 0b0100010001000000;
-     matrix[3]  = 0b0100000001000000;
-     matrix[4]  = 0b0100000001000000;
-     matrix[5]  = 0b0010000010000000;
-     matrix[6]  = 0b0001000100000000;
-     matrix[7]  = 0b0000101000000000;
-     matrix[8]  = 0b0000010000000000;
-     matrix[9]  = 0b0000000000000000;
-     matrix[10] = 0b0000000000000000;
-     matrix[11] = 0b0000000000000000;
-     matrix[12] = 0b0000000000000000;
-     matrix[13] = 0b0000000000000000;
-     matrix[14] = 0b0000000000000000;
-     matrix[15] = 0b0000000000000000;
-     break;
-     case 3:
-     matrix[0]  = 0b0011101110000000;
-     matrix[1]  = 0b0100010001000000;
-     matrix[2]  = 0b1000010000100000;
-     matrix[3]  = 0b1000000000100000;
-     matrix[4]  = 0b1000000000100000;
-     matrix[5]  = 0b0100000001000000;
-     matrix[6]  = 0b0010000010000000;
-     matrix[7]  = 0b0001000100000000;
-     matrix[8]  = 0b0000101000000000;
-     matrix[9]  = 0b0000010000000000;
-     matrix[10] = 0b0000000000000000;
-     matrix[11] = 0b0000000000000000;
-     matrix[12] = 0b0000000000000000;
-     matrix[13] = 0b0000000000000000;
-     matrix[14] = 0b0000000000000000;
-     matrix[15] = 0b0000000000000000;
-     break; 
-     case 4:
-     matrix[0]  = 0b0011101110000000;
-     matrix[1]  = 0b0111111111000000;
-     matrix[2]  = 0b1100010001100000;
-     matrix[3]  = 0b1100000001100000;
-     matrix[4]  = 0b1100000001100000;
-     matrix[5]  = 0b0110000011000000;
-     matrix[6]  = 0b0011000110000000;
-     matrix[7]  = 0b0001101100000000;
-     matrix[8]  = 0b0000111000000000;
-     matrix[9] = 0b0000010000000000;
-     matrix[10] = 0b0000000000000000;
-     matrix[11] = 0b0000000000000000;
-     matrix[12] = 0b0000000000000000;
-     matrix[13] = 0b0000000000000000;
-     matrix[14] = 0b0000000000000000;
-     matrix[15] = 0b0000000000000000;
-     break;
-     case 5:
-     matrix[0]  = 0b0011101110000000;
-     matrix[1]  = 0b0111111111000000;
-     matrix[2]  = 0b1111111111100000;
-     matrix[3]  = 0b1110010011100000;
-     matrix[4]  = 0b1110000011100000;
-     matrix[5]  = 0b0111000111000000;
-     matrix[6]  = 0b0011101110000000;
-     matrix[7]  = 0b0001111100000000;
-     matrix[8]  = 0b0000111000000000;
-     matrix[9] = 0b0000010000000000;
-     matrix[10] = 0b0000000000000000;
-     matrix[11] = 0b0000000000000000;
-     matrix[12] = 0b0000000000000000;
-     matrix[13] = 0b0000000000000000;
-     matrix[14] = 0b0000000000000000;
-     matrix[15] = 0b0000000000000000;
-     break;
-     case 6:
-     matrix[0]  = 0b0011101110000000;
-     matrix[1]  = 0b0111111111000000;
-     matrix[2]  = 0b1111111111100000;
-     matrix[3]  = 0b1111111111100000;
-     matrix[4]  = 0b1111111111100000;
-     matrix[5]  = 0b0111111111000000;
-     matrix[6]  = 0b0011111110000000;
-     matrix[7]  = 0b0001111100000000;
-     matrix[8]  = 0b0000111000000000;
-     matrix[9]  = 0b0000010000000000;
-     matrix[10] = 0b0000000000000000;
-     matrix[11] = 0b0000000000000000;
-     matrix[12] = 0b0000000000000000;
-     matrix[13] = 0b0000000000000000;
-     matrix[14] = 0b0000000000000000;
-     matrix[15] = 0b0000000000000000;
-     break;
-  }
-}
-
-//Schweizerkreuz ausgeben
-void setNFT() {
-    if (Nnr >= 3)
-      Nnr = 1;
-    else
-      Nnr++;
-  
-  switch (Nnr)
-    {
-     case 1:
-     matrix[0]  = 0b0000000000000000;
-     matrix[1]  = 0b0000000000000000;
-     matrix[2]  = 0b0000000000000000;
-     matrix[3]  = 0b0000010000000000;
-     matrix[4]  = 0b0000111000000000;
-     matrix[5]  = 0b0000010000000000;
-     matrix[6]  = 0b0000000000000000;
-     matrix[7]  = 0b0000000000000000;
-     matrix[8]  = 0b0000000000000000;
-     matrix[9]  = 0b0000000000000000;
-     matrix[10] = 0b0000000000000000;
-     matrix[11] = 0b0000000000000000;
-     matrix[12] = 0b0000000000000000;
-     matrix[13] = 0b0000000000000000;
-     matrix[14] = 0b0000000000000000;
-     matrix[15] = 0b0000000000000000;
-     break;
-     case 2:
-     matrix[0]  = 0b0000111000000000;
-     matrix[1]  = 0b0000111000000000;
-     matrix[2]  = 0b0000111000000000;
-     matrix[3]  = 0b0111111111000000;
-     matrix[4]  = 0b0111111111000000;
-     matrix[5]  = 0b0111111111000000;
-     matrix[6]  = 0b0000111000000000;
-     matrix[7]  = 0b0000111000000000;
-     matrix[8]  = 0b0000111000000000;
-     matrix[9]  = 0b0000000000000000;
-     matrix[10] = 0b0000000000000000;
-     matrix[11] = 0b0000000000000000;
-     matrix[12] = 0b0000000000000000;
-     matrix[13] = 0b0000000000000000;
-     matrix[14] = 0b0000000000000000;
-     matrix[15] = 0b0000000000000000;
-     break;
-     case 3:
-     matrix[0]  = 0b0000111000000000;
-     matrix[1]  = 0b0000111000000000;
-     matrix[2]  = 0b0000111000000000;
-     matrix[3]  = 0b0111101111000000;
-     matrix[4]  = 0b0111000111000000;
-     matrix[5]  = 0b0111101111000000;
-     matrix[6]  = 0b0000111000000000;
-     matrix[7]  = 0b0000111000000000;
-     matrix[8]  = 0b0000111000000000;
-     matrix[9]  = 0b0000000000000000;
-     matrix[10] = 0b0000000000000000;
-     matrix[11] = 0b0000000000000000;
-     matrix[12] = 0b0000000000000000;
-     matrix[13] = 0b0000000000000000;
-     matrix[14] = 0b0000000000000000;
-     matrix[15] = 0b0000000000000000;
-     break;
   }
 }
 
